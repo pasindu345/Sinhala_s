@@ -4,7 +4,7 @@ import * as cheerio from "cheerio";
 const BASE_URL = "https://www.baiscope.lk";
 
 export default async function handler(req, res) {
-  const query = req.query.query;
+  const query = req.query.query || req.query.search;
   const baseApi = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
 
   if (!query) {
@@ -12,24 +12,25 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1️⃣ Search the site
     const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
     const { data: html } = await axios.get(searchUrl, {
       headers: { "User-Agent": "Mozilla/5.0" },
     });
 
-    // 2️⃣ Parse results
     const $ = cheerio.load(html);
     const results = [];
 
-    $("article.elementor-post").each((_, el) => {
-      const link =
+    // Try multiple possible post selectors (Baiscope layout sometimes varies)
+    $("article.elementor-post, div.elementor-post, div.blog-post").each((_, el) => {
+      let link =
         $(el)
-          .find("a.elementor-post__thumbnail__link, h5.elementor-post__title a")
+          .find("a.elementor-post__thumbnail__link, h5.elementor-post__title a, a[href*='/movies/'], a[href*='/subtitles/']")
           .first()
           .attr("href") || "";
 
-      const title = $(el).find("h5.elementor-post__title").text().trim();
+      const title =
+        $(el).find("h5.elementor-post__title, h2.elementor-post__title, h3.entry-title").first().text().trim() ||
+        $(el).find("a").first().text().trim();
 
       if (title && link && !title.includes("Collection")) {
         results.push({
@@ -40,7 +41,9 @@ export default async function handler(req, res) {
     });
 
     if (results.length === 0) {
-      return res.status(404).json({ error: "No subtitles found" });
+      // Debug HTML if nothing is found
+      console.log("No results found for:", query);
+      return res.status(404).json({ error: "No subtitles found for that query" });
     }
 
     return res.status(200).json(results);
